@@ -16,10 +16,24 @@ type Language = (typeof SUPPORTED_LANGUAGES)[number]["value"];
 
 const TERMINAL_EXPANDED_HEIGHT = 200;
 const TERMINAL_COLLAPSED_HEIGHT = 40;
+const STARTER_CODE: Record<Language, string> = {
+  javascript: "// JavaScript\nconsole.log('Hello, world!');\n",
+  python: "# Python\nprint('Hello, world!')\n",
+  java: "public class Main {\n  public static void main(String[] args) {\n    System.out.println(\"Hello, world!\");\n  }\n}\n",
+  cpp: "#include <iostream>\n\nint main() {\n  std::cout << \"Hello, world!\" << std::endl;\n  return 0;\n}\n",
+  c: "#include <stdio.h>\n\nint main(void) {\n  printf(\"Hello, world!\\n\");\n  return 0;\n}\n"
+};
+const LANGUAGE_FILE_EXTENSIONS: Record<Language, string> = {
+  javascript: "js",
+  python: "py",
+  java: "java",
+  cpp: "cpp",
+  c: "c"
+};
 
 export function CodeTool({ isActive }: ToolComponentProps) {
   const [selectedLanguage, setSelectedLanguage] = useState<Language>("javascript");
-  const [code, setCode] = useState("// Start coding here\n");
+  const [code, setCode] = useState(STARTER_CODE.javascript);
   const [isTerminalExpanded, setIsTerminalExpanded] = useState(true);
   const [terminalOutput, setTerminalOutput] = useState("");
   const [running, setRunning] = useState(false);
@@ -38,7 +52,7 @@ export function CodeTool({ isActive }: ToolComponentProps) {
     setTerminalOutput("🔄 Executing code...\n");
     await new Promise((resolve) => setTimeout(resolve, 450));
     setTerminalOutput(
-      `✅ Local run simulation\nLanguage: ${selectedLanguage}\nCharacters: ${code.length}\n\n(Execution endpoint not wired in simple-classroom)`
+      `✅ Local run simulation\nLanguage: ${selectedLanguage}\nCharacters: ${code.length}\n\n(Execution endpoint not wired in this classroom)`
     );
     setRunning(false);
   };
@@ -50,7 +64,12 @@ export function CodeTool({ isActive }: ToolComponentProps) {
           <span className="text-sm text-gray-400">Language :</span>
           <select
             value={selectedLanguage}
-            onChange={(e) => setSelectedLanguage(e.target.value as Language)}
+            onChange={(e) => {
+              const nextLanguage = e.target.value as Language;
+              setSelectedLanguage(nextLanguage);
+              setCode(STARTER_CODE[nextLanguage]);
+              setTerminalOutput("");
+            }}
             className="px-3 py-1.5 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-sm text-gray-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
           >
             {SUPPORTED_LANGUAGES.map((lang) => (
@@ -89,6 +108,8 @@ export function CodeTool({ isActive }: ToolComponentProps) {
         }}
       >
         <Editor
+          key={selectedLanguage}
+          path={`file:///main.${LANGUAGE_FILE_EXTENSIONS[selectedLanguage]}`}
           height="100%"
           width="100%"
           theme="vs-dark"

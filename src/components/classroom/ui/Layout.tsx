@@ -60,10 +60,7 @@ export function Layout({ onLeave }: LayoutProps) {
                 Transcript
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto text-sm text-gray-500">
-                <p className="mb-2">AI and user transcript will appear here.</p>
-                <p className="text-xs text-gray-600">
-                  Reserved for future integration.
-                </p>
+                <p>Session Conversation will be shown here</p>
               </div>
             </div>
           </div>
