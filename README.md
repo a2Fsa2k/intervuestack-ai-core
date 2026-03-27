@@ -47,47 +47,47 @@ npm run build
 
 ```text
 IntervueStack-AI-Core/
-  public/
-    logo.svg
-  src/
-    components/
-      classroom/
-        composition/
-          ClassroomExperience.tsx
-        modes/
-          ai-interviewer/
-            AiInterviewerClassroom.tsx
-          standard/
-            StandardClassroom.tsx
-        runtime/
-          ClassroomContext.tsx
-          classroomMachine.ts
-          types.ts
-        setup/
-          SessionSetup.tsx
-        tools/
-          code/
-            CodeTool.tsx
-          whiteboard/
-            WhiteboardTool.tsx
-          core/
-            ToolTypes.ts
-            ToolProvider.tsx
-          registry.tsx
-        ui/
-          ClassroomShell.tsx
-          Layout.tsx
-          ControlsBar.tsx
-          Panels/
-            ToolPanel.tsx
-            VideoPanel.tsx
-            ChatPanel.tsx
-          ToolsPanel.tsx
-        types/
-          modes.ts
-        index.ts
-    App.tsx
-    main.tsx
+|-- public/
+|   `-- logo.svg
+`-- src/
+    |-- components/
+    |   `-- classroom/
+    |       |-- composition/
+    |       |   `-- ClassroomExperience.tsx
+    |       |-- modes/
+    |       |   |-- ai-interviewer/
+    |       |   |   `-- AiInterviewerClassroom.tsx
+    |       |   `-- standard/
+    |       |       `-- StandardClassroom.tsx
+    |       |-- runtime/
+    |       |   |-- ClassroomContext.tsx
+    |       |   |-- classroomMachine.ts
+    |       |   `-- types.ts
+    |       |-- setup/
+    |       |   `-- SessionSetup.tsx
+    |       |-- tools/
+    |       |   |-- code/
+    |       |   |   `-- CodeTool.tsx
+    |       |   |-- whiteboard/
+    |       |   |   `-- WhiteboardTool.tsx
+    |       |   |-- core/
+    |       |   |   |-- ToolTypes.ts
+    |       |   |   `-- ToolProvider.tsx
+    |       |   `-- registry.tsx
+    |       |-- ui/
+    |       |   |-- ClassroomShell.tsx
+    |       |   |-- Layout.tsx
+    |       |   |-- ControlsBar.tsx
+    |       |   |-- Panels/
+    |       |   |   |-- ToolPanel.tsx
+    |       |   |   |-- VideoPanel.tsx
+    |       |   |   `-- ChatPanel.tsx
+    |       |   `-- ToolsPanel.tsx
+    |       |-- types/
+    |       |   `-- modes.ts
+    |       `-- index.ts
+    |-- App.tsx
+    `-- main.tsx
 ```
 
 ---
