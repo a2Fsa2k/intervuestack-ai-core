@@ -3,6 +3,9 @@ import { useClassroomContext } from "../runtime/ClassroomContext";
 import { ControlsBar } from "./ControlsBar";
 import { ToolPanel } from "./Panels/ToolPanel";
 import { VideoPanel } from "./Panels/VideoPanel";
+import { TranscriptPanel } from "../ai/TranscriptPanel";
+import { FeedbackPanel } from "../ai/feedback/FeedbackPanel";
+import { useInterviewController } from "../ai/useInterviewController";
 
 interface LayoutProps {
   onLeave: () => void;
@@ -10,6 +13,7 @@ interface LayoutProps {
 
 export function Layout({ onLeave }: LayoutProps) {
   const { state } = useClassroomContext();
+  const { transcript, isThinking, sendUserText, feedback } = useInterviewController();
   const [currentTime, setCurrentTime] = useState(
     new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })
   );
@@ -54,15 +58,12 @@ export function Layout({ onLeave }: LayoutProps) {
             <VideoPanel label="AI Interviewer" isPresent={true} isMainView={false} />
           </div>
 
-          <div className="flex-1 min-h-0 border-b border-[#1a1a1a] bg-[#0a0a0a] p-3">
-            <div className="h-full border border-[#1a1a1a] bg-[#070707] p-3 flex flex-col">
-              <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-                Transcript
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto text-sm text-gray-500">
-                <p>Session Conversation will be shown here</p>
-              </div>
-            </div>
+          <div className="flex-1 min-h-0 border-b border-[#1a1a1a] bg-[#0a0a0a] p-3 overflow-y-auto">
+            {feedback ? (
+              <FeedbackPanel feedback={feedback} />
+            ) : (
+              <TranscriptPanel transcript={transcript} isThinking={isThinking} onSend={sendUserText} />
+            )}
           </div>
 
           <div className="border-t border-[#1a1a1a] flex-shrink-0">

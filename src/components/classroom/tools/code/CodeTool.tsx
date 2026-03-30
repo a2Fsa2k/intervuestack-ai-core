@@ -3,6 +3,9 @@ import { Editor } from "@monaco-editor/react";
 import { ChevronUp, Loader2, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ToolComponentProps } from "../core/ToolTypes";
+import { useClassroomContext } from "../../runtime/ClassroomContext";
+import { evaluateUserCodeJS } from "../../ai/codeEval";
+import { DSA_PROBLEMS } from "../../ai/problems/dsaProblems";
 
 const SUPPORTED_LANGUAGES = [
   { value: "javascript", label: "JavaScript" },
@@ -32,8 +35,10 @@ const LANGUAGE_FILE_EXTENSIONS: Record<Language, string> = {
 };
 
 export function CodeTool({ isActive }: ToolComponentProps) {
+  const { state, dispatch } = useClassroomContext();
+
   const [selectedLanguage, setSelectedLanguage] = useState<Language>("javascript");
-  const [code, setCode] = useState(STARTER_CODE.javascript);
+  const [code, setCode] = useState(state.code ?? STARTER_CODE.javascript);
   const [isTerminalExpanded, setIsTerminalExpanded] = useState(true);
   const [terminalOutput, setTerminalOutput] = useState("");
   const [running, setRunning] = useState(false);
@@ -50,11 +55,39 @@ export function CodeTool({ isActive }: ToolComponentProps) {
 
     setRunning(true);
     setTerminalOutput("🔄 Executing code...\n");
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    setTerminalOutput(
-      `✅ Local run simulation\nLanguage: ${selectedLanguage}\nCharacters: ${code.length}\n\n(Execution endpoint not wired in this classroom)`
-    );
-    setRunning(false);
+
+    try {
+      if (selectedLanguage === "javascript" && state.sessionType === "dsa") {
+        const problem = state.activeProblemId
+          ? DSA_PROBLEMS.find((p) => p.id === state.activeProblemId)
+          : undefined;
+
+        if (problem) {
+          const res = await evaluateUserCodeJS({ userCode: code, problem });
+          const summary = `✅ Tests: ${res.passedCount}/${res.totalCount} passed`;
+          const failLines = res.failures.length
+            ? "\n\nFailures:\n" +
+              res.failures
+                .map((f) => `- ${f.name}: expected ${JSON.stringify(f.expected)} got ${JSON.stringify(f.received)}${f.error ? ` (${f.error})` : ""}`)
+                .join("\n")
+            : "";
+          setTerminalOutput(summary + failLines);
+        } else {
+          setTerminalOutput(
+            "ℹ️ No active interview problem is selected yet. Ask the interviewer to start a problem (or restart the session)."
+          );
+        }
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        setTerminalOutput(
+          `✅ Local run simulation\nLanguage: ${selectedLanguage}\nCharacters: ${code.length}\n\n(Execution endpoint not wired in this classroom)`
+        );
+      }
+    } catch (e) {
+      setTerminalOutput(`❌ Execution error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRunning(false);
+    }
   };
 
   return (
@@ -115,7 +148,11 @@ export function CodeTool({ isActive }: ToolComponentProps) {
           theme="vs-dark"
           language={selectedLanguage}
           value={code}
-          onChange={(value) => setCode(value ?? "")}
+          onChange={(value) => {
+            const next = value ?? "";
+            setCode(next);
+            dispatch({ type: "UPDATE_CODE", code: next });
+          }}
           loading={
             <div className="h-full w-full flex items-center justify-center bg-[#0a0a0a]">
               <div className="text-center space-y-2">

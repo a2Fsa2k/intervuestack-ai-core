@@ -14,4 +14,5 @@ export interface ClassroomRuntimeState {
   activeTool: ToolType;
   openTools: DomainToolType[];
   code: string;
+  activeProblemId?: string;
 }

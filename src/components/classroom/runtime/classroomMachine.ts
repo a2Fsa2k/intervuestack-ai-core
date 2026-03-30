@@ -6,6 +6,7 @@ export type ClassroomEvent =
   | { type: "OPEN_TOOL"; tool: DomainToolType }
   | { type: "CLOSE_TOOL"; tool: DomainToolType }
   | { type: "UPDATE_CODE"; code: string }
+  | { type: "SET_ACTIVE_PROBLEM"; problemId: string }
   | { type: "END_SESSION" };
 
 export function createInitialClassroomState(
@@ -18,6 +19,7 @@ export function createInitialClassroomState(
     sessionType,
     activeTool: sessionType === "dsa" ? "code_editor" : "whiteboard",
     openTools: sessionType === "dsa" ? ["code_editor"] : ["whiteboard"],
+    activeProblemId: sessionType === "dsa" ? undefined : undefined,
     code:
       sessionType === "dsa"
         ? "// Solve your DSA problem here\nfunction solve() {\n  return null;\n}\n"
@@ -53,6 +55,8 @@ export function classroomMachineReducer(
     }
     case "UPDATE_CODE":
       return { ...state, code: event.code };
+    case "SET_ACTIVE_PROBLEM":
+      return { ...state, activeProblemId: event.problemId };
     case "END_SESSION":
       return { ...state, status: "ended" };
     default:

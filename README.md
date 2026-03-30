@@ -217,3 +217,48 @@ IntervueStack-AI-Core/
 **Built for IntervueStack contributors**
 
 </div>
+
+# IntervueStack-AI-Core
+
+## Overview
+A modular AI-powered DSA interviewer for realistic mock technical interviews. Features:
+- Voice-based interaction (ElevenLabs STT)
+- Monaco code editor with real JS/TS code evaluation
+- LLM-driven interviewer (Gemini API)
+- Visible transcript and structured feedback
+- Modular, extensible, robust architecture
+
+## Features
+- Realistic 30–45 min interview session flow
+- Context-aware, LLM-guided interviewer
+- Voice input with transcript
+- Code analysis and real test execution
+- Structured feedback at session end
+
+## Quickstart
+1. Clone the repo:
+   ```bash
+   git clone <repo-url>
+   cd IntervueStack-AI-Core
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Add `.env.local` with your API keys (see sample in repo).
+4. Start the dev servers:
+   ```bash
+   npm run dev
+   # In another terminal:
+   npm run stt-server
+   ```
+5. Open the app in your browser and start a session.
+
+## Architecture
+See `REPORT.md` for a detailed system design, ASCII diagrams, and explanations.
+
+## Authors
+- Your Name Here
+
+---
+**For more details, see the full report in `REPORT.md`.**
