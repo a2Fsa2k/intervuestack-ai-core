@@ -257,8 +257,4 @@ A modular AI-powered DSA interviewer for realistic mock technical interviews. Fe
 ## Architecture
 See `REPORT.md` for a detailed system design, ASCII diagrams, and explanations.
 
-## Authors
-- Your Name Here
-
----
 **For more details, see the full report in `REPORT.md`.**
