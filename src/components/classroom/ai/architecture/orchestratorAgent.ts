@@ -4,7 +4,7 @@ import { questionBankAgent } from "./agents/questionBankAgent";
 import { evaluatorAgent } from "./agents/evaluatorAgent";
 import { personaAgent } from "./agents/personaAgent";
 import { timeManager } from "./agents/timeManager";
-import { generateGeminiJSON } from "../geminiClient";
+import { generateOpenAIJSON } from "../openaiClient";
 
 export interface OrchestratorAgentInput {
   store: AIInterviewStoreState;
@@ -45,6 +45,20 @@ function transcriptTail(transcript: TranscriptTurn[], maxTurns = 10): string {
     .join("\n");
 }
 
+function parseCodeMonitorSignals(userInput?: string): string[] {
+  if (!userInput) return [];
+  const m = userInput.match(/^\[CODE_MONITOR\]\s*(.*)$/);
+  if (!m) return [];
+  return m[1]
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isTimerMilestone(userInput?: string): boolean {
+  return Boolean(userInput && userInput.startsWith("[TIMER_"));
+}
+
 function sanitizeNextPhase(current: NextPhase, requested?: NextPhase, hasProblem?: boolean): NextPhase {
   if (!requested) return current;
 
@@ -60,11 +74,17 @@ export async function orchestratorAgent(input: OrchestratorAgentInput): Promise<
   const { store, transcript, userInput, userCode, startedAt, now, reason } = input;
   const dispatches: StoreAction[] = [];
 
-  // Always keep snapshots fresh.
-  if (typeof userInput === "string" && userInput.trim()) {
+  const codeSignals = parseCodeMonitorSignals(userInput);
+
+  // Always keep snapshots fresh for event; avoid constantly updating code snapshots on timer.
+  if (typeof userInput === "string" && userInput.trim() && reason === "event") {
     dispatches.push({ type: "MAIN/SET_LAST_USER_INPUT", text: userInput, at: now });
   }
-  dispatches.push({ type: "MAIN/SET_CODE_SNAPSHOT", code: userCode, at: now });
+
+  // Only store code snapshot when it changed meaningfully (simple heuristic)
+  if (reason === "event") {
+    dispatches.push({ type: "MAIN/SET_CODE_SNAPSHOT", code: userCode, at: now });
+  }
 
   // Deterministic time manager.
   const tm = timeManager({ secondary: store.secondary, startedAt, now });
@@ -81,6 +101,7 @@ export async function orchestratorAgent(input: OrchestratorAgentInput): Promise<
   }
 
   const recentTranscriptText = transcriptTail(transcript);
+  const rollingSummary = store.main.rollingSummary || "";
 
   // Deterministic signals (no user-facing text here).
   const qb = questionBankAgent({ main: store.main, secondary: store.secondary });
@@ -94,6 +115,7 @@ export async function orchestratorAgent(input: OrchestratorAgentInput): Promise<
     difficulty: store.secondary.difficulty
   });
 
+  // Only run code eval on user events in coding-like phases.
   const shouldRunCodeEval =
     reason === "event" &&
     (store.main.phase === "coding" || store.main.phase === "testing" || store.main.phase === "optimization");
@@ -111,6 +133,27 @@ export async function orchestratorAgent(input: OrchestratorAgentInput): Promise<
     dispatches.push({ type: "SECONDARY/SET_CODE_EVAL", result: evalOut.codeEval ?? null });
   }
 
+  // Provide candidate-specific, non-spammy intervention hints to the LLM.
+  const interventionHints: string[] = [];
+  if (reason === "timer" && codeSignals.length) {
+    if (codeSignals.includes("stuck_no_progress")) {
+      interventionHints.push("Candidate seems stuck. Ask them to narrate their current approach and next step.");
+    }
+    if (codeSignals.includes("likely_bruteforce")) {
+      interventionHints.push("Candidate likely heading toward brute force. Ask about time complexity and better approach.");
+    }
+    if (codeSignals.includes("repeated_syntax_errors") || codeSignals.includes("syntax_error")) {
+      interventionHints.push("Candidate hitting syntax errors. Ask to explain logic first; then fix syntax.");
+    }
+    if (codeSignals.includes("solution_progress")) {
+      interventionHints.push("Candidate may have a working shape. Prompt them to test edge cases and run tests.");
+    }
+  }
+
+  if (reason === "timer" && isTimerMilestone(userInput)) {
+    interventionHints.push("This is a timer milestone. Keep the message short and practical.");
+  }
+
   // Single conversational generation: ONLY this LLM call produces user-facing text.
   const llmUser = [
     "You are the ONE interviewer brain. Produce the next interviewer message.",
@@ -120,11 +163,9 @@ export async function orchestratorAgent(input: OrchestratorAgentInput): Promise<
     "- Avoid excessive praise. Do not compliment every answer.",
     "- Use acknowledgements like: 'Okay.', 'Understood.', 'Makes sense.', 'Good.'",
     "Guidelines:",
-    "- Be coherent in tone and flow.",
-    "- Use intent/hint as guidance, but write naturally.",
     "- Do not dump solutions.",
-    "- If code is failing, ask targeted questions based on evaluator insights.",
-    "- If user wants to end or timing says stop, wrap up briefly.",
+    "- Use rolling summary as primary context; use transcript tail for immediate phrasing.",
+    "- If this is a timer intervention, avoid re-asking the same question verbatim.",
     "Return ONLY JSON: { message: string, nextPhase?: string, shouldEnd?: boolean }",
     "",
     `Current phase: ${store.main.phase}`,
@@ -132,22 +173,28 @@ export async function orchestratorAgent(input: OrchestratorAgentInput): Promise<
     `Intent: ${qb.intent ?? "(none)"}`,
     `Hint: ${qb.hint ?? "(none)"}`,
     `Problem: ${qb.problem?.title ?? store.main.problem?.title ?? "(none)"}`,
-    `Constraints: ${(qb.problem?.constraints ?? store.main.problem?.constraints ?? []).join(" | ") || "(none)"}`,
     "Persona style (structured):",
     JSON.stringify(persona),
     "Evaluator insights (structured):",
     JSON.stringify(evalOut),
     "Timing signals:",
     JSON.stringify(timingSignals),
-    "Recent transcript:",
+    "Autonomy / code monitor signals:",
+    codeSignals.length ? codeSignals.join(", ") : "(none)",
+    "Intervention hints:",
+    interventionHints.length ? interventionHints.join(" | ") : "(none)",
+    "Rolling summary:",
+    rollingSummary || "(empty)",
+    "Recent transcript tail:",
     recentTranscriptText || "(empty)",
-    "User code snapshot:",
-    userCode
+    "User code snapshot (truncate if large):",
+    userCode.length > 2000 ? userCode.slice(0, 2000) + "\n...<truncated>" : userCode
   ].join("\n");
 
-  const llm = await generateGeminiJSON<OrchestratorLLMResponse>({
+  const llm = await generateOpenAIJSON<OrchestratorLLMResponse>({
     system: "You are a production-grade AI interviewer orchestrator.",
     user: llmUser,
+    model: "gpt-4o-mini",
     temperature: 0.35,
     validate: isOrchestratorLLMResponse,
     fallback: {

@@ -3,7 +3,7 @@ import { Mic, Send, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TranscriptTurn } from "./types";
 import { createAudioRecorder } from "./stt/recorder";
-import { transcribeWithElevenLabs } from "./stt/elevenLabsStt";
+import { transcribeWithOpenAI } from "./stt/openaiStt";
 
 interface TranscriptPanelProps {
   transcript: TranscriptTurn[];
@@ -46,7 +46,7 @@ export function TranscriptPanel({ transcript, isThinking, onSend }: TranscriptPa
       setListening(false);
       recorderRef.current = null;
 
-      const text = await transcribeWithElevenLabs(audio);
+      const text = await transcribeWithOpenAI(audio);
       setInterim("");
       onSend(text);
     } catch (e) {

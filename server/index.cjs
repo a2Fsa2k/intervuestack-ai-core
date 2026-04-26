@@ -6,9 +6,13 @@ require('dotenv').config({ path: path.join(process.cwd(), '.env.local') });
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_STT_MODEL_ID = process.env.ELEVENLABS_STT_MODEL_ID || 'scribe_v1';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 if (!ELEVENLABS_API_KEY) {
   console.warn('[server] Missing ELEVENLABS_API_KEY in .env.local');
+}
+if (!OPENAI_API_KEY) {
+  console.warn('[server] Missing OPENAI_API_KEY in .env.local (only needed if you proxy OpenAI STT through server)');
 }
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
@@ -49,6 +53,45 @@ app.post('/api/stt', upload.single('audio'), async (req, res) => {
     }
 
     // Expected shape: { text: "..." , ... }
+    try {
+      const json = JSON.parse(text);
+      return res.json(json);
+    } catch {
+      return res.send(text);
+    }
+  } catch (e) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.post('/api/stt/openai', upload.single('audio'), async (req, res) => {
+  try {
+    if (!OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'Missing OPENAI_API_KEY' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ error: 'Missing audio file' });
+    }
+
+    const fd = new FormData();
+    const blob = new Blob([req.file.buffer], { type: req.file.mimetype || 'application/octet-stream' });
+    fd.append('file', blob, req.file.originalname || 'audio.webm');
+    fd.append('model', 'gpt-4o-mini-transcribe');
+    fd.append('language', 'en');
+
+    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: fd
+    });
+
+    const text = await r.text();
+    if (!r.ok) {
+      return res.status(r.status).send(text);
+    }
+
     try {
       const json = JSON.parse(text);
       return res.json(json);

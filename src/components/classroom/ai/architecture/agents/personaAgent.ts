@@ -1,4 +1,4 @@
-import { generateGeminiJSON } from "../../geminiClient";
+import { generateOpenAIJSON } from "../../openaiClient";
 
 export interface PersonaStyle {
   interviewerStyle: string;
@@ -16,7 +16,6 @@ export async function personaAgent(opts: {
 }): Promise<PersonaStyle> {
   const { selectedTopic, difficulty } = opts;
 
-  // Lightweight prompt; keep it stable to reduce prompt tokens.
   const user = [
     "Return ONLY valid JSON with keys: interviewerStyle, probingStyle, tone.",
     `Topic: ${selectedTopic ?? "(none)"}`,
@@ -27,8 +26,20 @@ export async function personaAgent(opts: {
     "- tone: friendly but challenging"
   ].join("\n");
 
-  return generateGeminiJSON<PersonaStyle>({
+  return generateOpenAIJSON<PersonaStyle>({
     system: "You output stable interviewing style settings for a DSA interviewer.",
-    user
+    user,
+    model: "gpt-4o-mini",
+    temperature: 0.2,
+    validate: (v: unknown): v is PersonaStyle => {
+      if (!v || typeof v !== "object") return false;
+      const o = v as Record<string, unknown>;
+      return typeof o.interviewerStyle === "string" && typeof o.probingStyle === "string" && typeof o.tone === "string";
+    },
+    fallback: {
+      interviewerStyle: "concise and analytical",
+      probingStyle: "calm but probing",
+      tone: "neutral-positive"
+    }
   });
 }

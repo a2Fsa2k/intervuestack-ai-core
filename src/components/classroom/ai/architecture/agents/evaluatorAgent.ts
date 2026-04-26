@@ -1,7 +1,7 @@
 import type { AIInterviewStoreState } from "../store";
 import type { CodeEvalResult } from "../../types";
 import { evaluateUserCodeJS } from "../../codeEval";
-import { generateGeminiJSON } from "../../geminiClient";
+import { generateOpenAIJSON } from "../../openaiClient";
 
 export type CorrectnessLabel = "correct" | "partial" | "wrong";
 
@@ -76,9 +76,11 @@ export async function evaluatorAgent(opts: {
     `Correctness label (heuristic): ${correctness}`
   ].join("\n");
 
-  const llm = await generateGeminiJSON<Omit<EvaluatorOutput, "codeEval">>({
+  const llm = await generateOpenAIJSON<Omit<EvaluatorOutput, "codeEval">>({
     system: "Be strict; ground codeCorrectness in CodeEval. Keep issues/focusAreas short.",
     user,
+    model: "gpt-4o-mini",
+    temperature: 0.2,
     validate: isEvaluatorOutput,
     fallback: {
       scores: {

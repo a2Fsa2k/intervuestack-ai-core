@@ -5,6 +5,8 @@ import { evaluateUserCodeJS } from "./codeEval";
 import { generateStructuredFeedback } from "./feedback/feedbackGenerator";
 import { createInitialStoreState, aiInterviewStoreReducer } from "./architecture/store";
 import { orchestratorAgent } from "./architecture/orchestratorAgent";
+import { codeMonitorAgent } from "./architecture/agents/codeMonitorAgent";
+import { generateOpenAIJSON } from "./openaiClient";
 
 function uuid() {
   return crypto.randomUUID();
@@ -79,6 +81,53 @@ export function useInterviewController() {
   // Concurrency guard: prevent overlapping orchestrator calls
   const inFlightRef = useRef(false);
 
+  // Code monitor state (local, cheap)
+  const lastCodeSnapshotRef = useRef<string>("");
+  const lastMeaningfulCodeChangeAtRef = useRef<number>(Date.now());
+  const recentCodeSignalsRef = useRef<string[]>([]);
+  const lastCodeInterventionAtRef = useRef<number>(0);
+  const syntaxErrorStreakRef = useRef<number>(0);
+
+  // Rolling summary cadence
+  const lastSummaryTurnCountRef = useRef<number>(0);
+
+  async function maybeUpdateRollingSummary(useTranscript: TranscriptTurn[]) {
+    // Update every ~6 turns (cheap & bounded)
+    if (useTranscript.length - lastSummaryTurnCountRef.current < 6) return;
+    lastSummaryTurnCountRef.current = useTranscript.length;
+
+    // Build a compact input: current store state + tail.
+    const tail = useTranscript
+      .slice(-10)
+      .map((t) => `${t.role.toUpperCase()}: ${t.text}`)
+      .join("\n");
+
+    const system =
+      "You compress interview context into a rolling summary for an AI interviewer. Keep it short, factual, and actionable.";
+
+    const user = [
+      "Return ONLY valid JSON: { summary: string }",
+      `Phase: ${aiStoreRef.current.main.phase}`,
+      `Topic: ${aiStoreRef.current.main.selectedTopic ?? "(none)"}`,
+      `Problem: ${aiStoreRef.current.main.problem?.title ?? "(none)"}`,
+      `Existing summary: ${aiStoreRef.current.main.rollingSummary || "(empty)"}`,
+      "Recent transcript tail:",
+      tail
+    ].join("\n");
+
+    const out = await generateOpenAIJSON<{ summary: string }>({
+      system,
+      user,
+      model: "gpt-4o-mini",
+      temperature: 0.2,
+      validate: (v: unknown): v is { summary: string } =>
+        !!v && typeof v === "object" && typeof (v as any).summary === "string",
+      fallback: { summary: aiStoreRef.current.main.rollingSummary }
+    });
+
+    aiDispatch({ type: "MAIN/SET_ROLLING_SUMMARY", summary: out.summary.slice(0, 1200) });
+  }
+
   const runArchitectureStep = useCallback(
     async (reason: "event" | "timer", payload?: { userInput?: string; transcript?: TranscriptTurn[] }) => {
       if (inFlightRef.current) return;
@@ -109,6 +158,13 @@ export function useInterviewController() {
 
         // Apply store updates
         for (const a of res.dispatches) aiDispatch(a);
+
+        // Update rolling summary occasionally
+        try {
+          await maybeUpdateRollingSummary(useTranscript);
+        } catch {
+          // ignore summary failures (non-critical)
+        }
 
         // Keep legacy InterviewState roughly in sync for existing UI + feedback generator.
         setInterview((prev: InterviewState) => ({
@@ -270,6 +326,64 @@ export function useInterviewController() {
 
     return () => window.clearInterval(id);
   }, [feedback, runArchitectureStep]);
+
+  // Debounced code monitoring (never on every keystroke)
+  useEffect(() => {
+    if (feedback || interviewRef.current.phase === "ended") return;
+
+    const DEBOUNCE_MS = 900;
+    const INTERVENTION_COOLDOWN_MS = 75_000;
+
+    const t = window.setTimeout(() => {
+      const now = Date.now();
+      const phase = aiStoreRef.current.main.phase;
+      const problem = aiStoreRef.current.main.problem;
+
+      const prev = lastCodeSnapshotRef.current;
+      const curr = classroomState.code;
+
+      const monitor = codeMonitorAgent({
+        currentCode: curr,
+        previousCode: prev,
+        phase,
+        problemMetadata: problem as unknown as Record<string, any>,
+        now,
+        lastMeaningfulChangeAt: lastMeaningfulCodeChangeAtRef.current
+      });
+
+      lastCodeSnapshotRef.current = curr;
+      lastMeaningfulCodeChangeAtRef.current = monitor.updatedLastMeaningfulChangeAt;
+      recentCodeSignalsRef.current = monitor.signals;
+
+      // Track syntax error streak for "repeated_syntax_errors"
+      if (monitor.signals.includes("syntax_error")) syntaxErrorStreakRef.current += 1;
+      else syntaxErrorStreakRef.current = 0;
+
+      const meaningfulSignals = new Set(monitor.signals);
+      if (syntaxErrorStreakRef.current >= 3) meaningfulSignals.add("repeated_syntax_errors");
+
+      const shouldIntervene =
+        meaningfulSignals.has("stuck_no_progress") ||
+        meaningfulSignals.has("likely_bruteforce") ||
+        meaningfulSignals.has("repeated_syntax_errors") ||
+        meaningfulSignals.has("solution_progress");
+
+      if (!shouldIntervene) return;
+
+      if (inFlightRef.current) return;
+      const since = now - lastCodeInterventionAtRef.current;
+      if (since < INTERVENTION_COOLDOWN_MS) return;
+
+      lastCodeInterventionAtRef.current = now;
+
+      // Convey signals via userInput tags (no UI change)
+      void runArchitectureStep("timer", {
+        userInput: `[CODE_MONITOR] ${Array.from(meaningfulSignals).join(",")}`
+      });
+    }, DEBOUNCE_MS);
+
+    return () => window.clearTimeout(t);
+  }, [classroomState.code, feedback, runArchitectureStep]);
 
   const transcriptTextForDebug = useMemo(
     () =>

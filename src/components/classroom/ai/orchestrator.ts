@@ -1,13 +1,10 @@
 import type { CodeEvalResult, InterviewState, OrchestratorAction, TranscriptTurn } from "./types";
-import { generateGeminiJSON } from "./geminiClient";
 
 /**
  * DEPRECATED: legacy single-file orchestrator.
  *
- * This file is kept temporarily for compatibility with older imports
- * and for preserving helpful types/helpers.
- *
- * Production brain lives in `ai/architecture/orchestratorAgent.ts`.
+ * Kept only for helper exports.
+ * Do not use `nextAction()` in production; the brain lives in `ai/architecture/orchestratorAgent.ts`.
  */
 
 export function createInitialInterviewState(): InterviewState {
@@ -34,21 +31,12 @@ export async function nextAction(_opts: {
   userCode: string;
   lastCodeEval?: CodeEvalResult | null;
 }): Promise<{ interview: InterviewState; action: OrchestratorAction; maybeProblemStarterCode?: string }> {
-  // We intentionally do not provide a working implementation here to avoid
-  // duplicate orchestration paths in production.
-  // Any remaining callers should be migrated to `architecture/orchestratorAgent.ts`.
-  const llmAction = await generateGeminiJSON<OrchestratorAction>({
-    system: systemPrompt(),
-    user: "Migration required: call architecture/orchestratorAgent.ts instead of legacy nextAction()."
-  });
-
   return {
     interview: _opts.interview,
     action: {
-      type: llmAction?.type ?? "END_SESSION",
+      type: "END_SESSION",
       message:
-        llmAction?.message ??
-        "This project has migrated orchestrator logic. Please use the new architecture orchestrator.",
+        "This project has migrated orchestrator logic. Please use `architecture/orchestratorAgent.ts` (OpenAI-based).",
       phase: "ended"
     }
   };
