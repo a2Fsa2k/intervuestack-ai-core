@@ -4,7 +4,7 @@ import type { CodeEvalResult, InterviewState, TranscriptTurn } from "./types";
 import { evaluateUserCodeJS } from "./codeEval";
 import { generateStructuredFeedback } from "./feedback/feedbackGenerator";
 import { createInitialStoreState, aiInterviewStoreReducer } from "./architecture/store";
-import { orchestratorAgent } from "./architecture/orchestratorAgent";
+import { runRouterStep } from "./router/runRouter";
 import { codeMonitorAgent } from "./architecture/agents/codeMonitorAgent";
 import { generateOpenAIJSON } from "./openaiClient";
 
@@ -26,11 +26,27 @@ function createInitialInterviewStateLocal(): InterviewState {
 export function useInterviewController() {
   const { state: classroomState, dispatch } = useClassroomContext();
 
+  // Router state id (strict state-machine)
+  const [routerStateId, setRouterStateId] = useState<import("./router/stateMachine").RouterStateId>("greeting_init");
+  const routerStateIdRef = useRef(routerStateId);
+  useEffect(() => {
+    routerStateIdRef.current = routerStateId;
+  }, [routerStateId]);
+
   const [interview, setInterview] = useState<InterviewState>(() => createInitialInterviewStateLocal());
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const [lastEval, setLastEval] = useState<CodeEvalResult | null>(null);
   const [feedback, setFeedback] = useState<import("./feedback/feedbackGenerator").StructuredFeedback | null>(null);
+
+  // Cooldown for autonomous (timer/monitor) interventions
+  const lastAutoInterventionAtRef = useRef<number>(0);
+
+  // Safety: do not auto-intervene if an AI message was just sent
+  const lastAiMessageAtRef = useRef<number>(0);
+
+  // Lightweight anti-jitter: minimum duration before allowing state changes
+  const lastStateChangeAtRef = useRef<number>(Date.now());
 
   // Timer bookkeeping (no LLM calls unless a milestone triggers)
   const elapsedMsRef = useRef(0);
@@ -129,35 +145,65 @@ export function useInterviewController() {
   }
 
   const runArchitectureStep = useCallback(
-    async (reason: "event" | "timer", payload?: { userInput?: string; transcript?: TranscriptTurn[] }) => {
+    async (reason: "event" | "timer" | "monitor", payload?: { userInput?: string; transcript?: TranscriptTurn[] }) => {
       if (inFlightRef.current) return;
       inFlightRef.current = true;
 
-      // Only show spinner for user-driven events
       if (reason === "event") setIsThinking(true);
 
       try {
         const useTranscript = payload?.transcript ?? transcriptRef.current;
         const now = Date.now();
 
-        // Track last user activity on event steps.
         if (reason === "event") {
           lastUserActivityAtRef.current = now;
           timerFlagsRef.current.inactivityWarned = false;
         }
 
-        const res = await orchestratorAgent({
-          store: aiStoreRef.current,
-          transcript: useTranscript,
+        if (reason !== "event" && now - lastStateChangeAtRef.current < 15_000) {
+          return;
+        }
+
+        const elapsedMs = now - startedAtRef.current;
+        const idleMs = now - lastUserActivityAtRef.current;
+
+        const currentStateId = routerStateIdRef.current;
+
+        const res = await runRouterStep({
           userInput: payload?.userInput,
           userCode: classroomState.code,
-          startedAt: startedAtRef.current,
-          now,
-          reason
+          signalType: reason,
+          currentStateId,
+          store: aiStoreRef.current,
+          elapsedMs,
+          idleMs,
+          transcriptTail: useTranscript.slice(-10)
         });
 
-        // Apply store updates
+        // Persist router state (controller = memory)
+        if (res.nextStateId && res.nextStateId !== routerStateIdRef.current) {
+          // eslint-disable-next-line no-console
+          console.log("STATE TRANSITION:", routerStateIdRef.current, "→", res.nextStateId);
+          routerStateIdRef.current = res.nextStateId;
+          setRouterStateId(res.nextStateId);
+        }
+
         for (const a of res.dispatches) aiDispatch(a);
+
+        if (res.aiMessage) {
+          lastAiMessageAtRef.current = now;
+          lastStateChangeAtRef.current = now;
+          pushTurn({
+            role: "ai",
+            text: res.aiMessage,
+            meta: {
+              phase: aiStoreRef.current.main.phase,
+              actionType: "ROUTER_STEP",
+              reason,
+              routerStateId: routerStateIdRef.current
+            }
+          });
+        }
 
         // Update rolling summary occasionally
         try {
@@ -176,15 +222,6 @@ export function useInterviewController() {
           updatedAt: now
         }));
 
-        // Detect phase entry for timing incentives
-        const phaseNow = aiStoreRef.current.main.phase;
-        if (phaseNow === "coding") {
-          if (codingPhaseEnteredAtRef.current == null) codingPhaseEnteredAtRef.current = now;
-        } else {
-          codingPhaseEnteredAtRef.current = null;
-          timerFlagsRef.current.codingTimeWarned = false;
-        }
-
         // If we now have a problem, keep classroom runtime in sync.
         const nextProblem = aiStoreRef.current.main.problem;
         if (nextProblem?.id) {
@@ -192,48 +229,11 @@ export function useInterviewController() {
         }
 
         // Optional code eval (deterministic) if orchestrator indicates.
-        if (res.shouldRunCodeEval && nextProblem) {
-          const evalResult = await evaluateUserCodeJS({ userCode: classroomState.code, problem: nextProblem });
+        // Router path: keep existing eval behavior only when phase is code_review/testing.
+        if (aiStoreRef.current.main.problem && (routerStateIdRef.current === "code_review" || aiStoreRef.current.main.phase === "testing")) {
+          const evalResult = await evaluateUserCodeJS({ userCode: classroomState.code, problem: aiStoreRef.current.main.problem });
           setLastEval(evalResult);
           aiDispatch({ type: "SECONDARY/SET_CODE_EVAL", result: evalResult });
-        }
-
-        if (res.aiMessage) {
-          pushTurn({
-            role: "ai",
-            text: res.aiMessage,
-            meta: {
-              phase: aiStoreRef.current.main.phase,
-              actionType: "ARCH_STEP",
-              reason
-            }
-          });
-        }
-
-        if (res.shouldEnd) {
-          dispatch({ type: "END_SESSION" });
-          // Generate feedback at end
-          try {
-            const fb = await generateStructuredFeedback({
-              interview: interviewRef.current,
-              transcript: useTranscript,
-              userCode: classroomState.code,
-              lastCodeEval: lastEvalRef.current
-            });
-            setFeedback(fb);
-            setInterview((prev: InterviewState) => ({ ...prev, phase: "ended", feedback: fb }));
-          } catch (e) {
-            setFeedback({
-              rubric: {
-                problemUnderstanding: 1,
-                approachQuality: 1,
-                codeCorrectness: 1,
-                communication: 1,
-                notes: ["Error generating feedback: " + (e instanceof Error ? e.message : String(e))]
-              },
-              summary: "Could not generate feedback due to an error."
-            });
-          }
         }
       } catch (e) {
         pushTurn({ role: "system", text: `AI error: ${e instanceof Error ? e.message : String(e)}` });
@@ -271,7 +271,7 @@ export function useInterviewController() {
 
   // Timer: only triggers milestone interventions (no periodic LLM calls)
   useEffect(() => {
-    const CHECK_EVERY_MS = 2000;
+    const CHECK_EVERY_MS = 5_000;
     const INACTIVITY_MS = 90_000;
     const CODING_TOO_LONG_MS = 8 * 60_000;
     const SOFT_SESSION_MS = 25 * 60_000;
@@ -280,7 +280,6 @@ export function useInterviewController() {
 
     const id = window.setInterval(() => {
       if (feedback || interviewRef.current.phase === "ended") return;
-      // inFlightRef guards overlap; also avoid scheduling during user-visible think
       if (inFlightRef.current) return;
 
       const now = Date.now();
@@ -291,6 +290,22 @@ export function useInterviewController() {
         timerFlagsRef.current.hardStopped = true;
         void runArchitectureStep("timer", { userInput: "[TIMER_HARD_STOP]" });
         return;
+      }
+
+      // Router timer signal (idle-based) with cooldown
+      const sinceAuto = now - lastAutoInterventionAtRef.current;
+      const idleMs = now - lastUserActivityAtRef.current;
+
+      // Safety: do not auto-intervene if AI just spoke
+      if (now - lastAiMessageAtRef.current < 30_000) return;
+
+      if (sinceAuto >= 30_000) {
+        // Only send timer signals when in coding-ish router states
+        if (routerStateIdRef.current === "coding" && idleMs >= 60_000) {
+          lastAutoInterventionAtRef.current = now;
+          void runArchitectureStep("timer", { userInput: "[TIMER_IDLE]" });
+          return;
+        }
       }
 
       // Enforce cooldown for non-hard-stop interventions
@@ -332,7 +347,6 @@ export function useInterviewController() {
     if (feedback || interviewRef.current.phase === "ended") return;
 
     const DEBOUNCE_MS = 900;
-    const INTERVENTION_COOLDOWN_MS = 75_000;
 
     const t = window.setTimeout(() => {
       const now = Date.now();
@@ -355,31 +369,28 @@ export function useInterviewController() {
       lastMeaningfulCodeChangeAtRef.current = monitor.updatedLastMeaningfulChangeAt;
       recentCodeSignalsRef.current = monitor.signals;
 
-      // Track syntax error streak for "repeated_syntax_errors"
-      if (monitor.signals.includes("syntax_error")) syntaxErrorStreakRef.current += 1;
-      else syntaxErrorStreakRef.current = 0;
+      // Map existing agent's signals to router monitor signals
+      const monitorSignals: string[] = [];
+      if (monitor.signals.includes("stuck_no_progress")) monitorSignals.push("NO_PROGRESS");
+      if (monitor.signals.includes("rapid_rewrite")) monitorSignals.push("DIVERGED");
+      if (monitor.signals.includes("progressing")) monitorSignals.push("PROGRESSING");
 
-      const meaningfulSignals = new Set(monitor.signals);
-      if (syntaxErrorStreakRef.current >= 3) meaningfulSignals.add("repeated_syntax_errors");
+      // Persist monitor signals into store for classifier routing
+      aiDispatch({ type: "SECONDARY/SET_MONITOR_SIGNALS", signals: monitorSignals });
 
-      const shouldIntervene =
-        meaningfulSignals.has("stuck_no_progress") ||
-        meaningfulSignals.has("likely_bruteforce") ||
-        meaningfulSignals.has("repeated_syntax_errors") ||
-        meaningfulSignals.has("solution_progress");
-
-      if (!shouldIntervene) return;
+      // Only intervene on meaningful router signals (PROGRESSING never triggers by itself)
+      const meaningful = monitorSignals.includes("NO_PROGRESS") || monitorSignals.includes("DIVERGED");
+      if (!meaningful) return;
 
       if (inFlightRef.current) return;
-      const since = now - lastCodeInterventionAtRef.current;
-      if (since < INTERVENTION_COOLDOWN_MS) return;
 
-      lastCodeInterventionAtRef.current = now;
+      // Safety: do not auto-intervene if AI just spoke
+      if (now - lastAiMessageAtRef.current < 30_000) return;
 
-      // Convey signals via userInput tags (no UI change)
-      void runArchitectureStep("timer", {
-        userInput: `[CODE_MONITOR] ${Array.from(meaningfulSignals).join(",")}`
-      });
+      if (now - lastAutoInterventionAtRef.current < 30_000) return;
+
+      lastAutoInterventionAtRef.current = now;
+      void runArchitectureStep("monitor", { userInput: "[MONITOR_SIGNAL]" });
     }, DEBOUNCE_MS);
 
     return () => window.clearTimeout(t);

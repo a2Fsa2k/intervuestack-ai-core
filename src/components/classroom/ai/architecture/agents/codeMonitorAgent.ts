@@ -84,8 +84,14 @@ export function codeMonitorAgent(input: CodeMonitorInput): CodeMonitorOutput {
   // No progress for long duration (only meaningful in coding-ish phases)
   const lastMeaningful = updatedLastMeaningfulChangeAt;
   const idleMs = now - lastMeaningful;
-  if ((phase === "coding" || phase === "testing" || phase === "optimization") && idleMs >= 90_000) {
+  const isStuck = (phase === "coding" || phase === "testing" || phase === "optimization") && idleMs >= 90_000;
+  if (isStuck) {
     signals.push("stuck_no_progress");
+  }
+
+  // Progressing: meaningful changes + syntax valid + not stuck
+  if ((phase === "coding" || phase === "testing") && changedMeaningfully && syntaxValid && !isStuck) {
+    signals.push("progressing");
   }
 
   // Thrashing: lots of changes but not stabilizing (very rough heuristic)

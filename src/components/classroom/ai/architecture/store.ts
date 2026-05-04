@@ -33,6 +33,7 @@ export interface SharedStateSecondary {
   followupsAsked: number;
   lastCodeEval?: CodeEvalResult | null;
   lastTimingSignal?: TimingSignal;
+  lastMonitorSignals?: string[];
   notes: string[];
 }
 
@@ -52,6 +53,7 @@ export type StoreAction =
   | { type: "SECONDARY/INC_FOLLOWUPS" }
   | { type: "SECONDARY/SET_CODE_EVAL"; result: CodeEvalResult | null }
   | { type: "SECONDARY/SET_TIMING_SIGNAL"; signal: TimingSignal }
+  | { type: "SECONDARY/SET_MONITOR_SIGNALS"; signals: string[] }
   | { type: "SECONDARY/ADD_NOTE"; note: string }
   | { type: "RESET"; state: AIInterviewStoreState };
 
@@ -72,6 +74,7 @@ export function createInitialStoreState(sessionId: string): AIInterviewStoreStat
       followupsAsked: 0,
       lastCodeEval: null,
       lastTimingSignal: undefined,
+      lastMonitorSignals: [],
       notes: []
     }
   };
@@ -105,6 +108,8 @@ export function aiInterviewStoreReducer(state: AIInterviewStoreState, action: St
       return { ...state, secondary: { ...state.secondary, lastCodeEval: action.result } };
     case "SECONDARY/SET_TIMING_SIGNAL":
       return { ...state, secondary: { ...state.secondary, lastTimingSignal: action.signal } };
+    case "SECONDARY/SET_MONITOR_SIGNALS":
+      return { ...state, secondary: { ...state.secondary, lastMonitorSignals: action.signals } };
     case "SECONDARY/ADD_NOTE":
       return { ...state, secondary: { ...state.secondary, notes: [...state.secondary.notes, action.note] } };
     case "RESET":
