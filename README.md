@@ -19,11 +19,9 @@
 
 ## About
 
-`IntervueStack-AI-Core` is an isolated development environment for the IntervueStack classroom experience, focused on AI interviewer workflows.
+IntervueStack-AI-Core is an AI-powered DSA mock interviewer. It simulates a realistic 30-45 minute technical interview where an LLM-driven interviewer guides the candidate through a problem, the candidate codes in a Monaco editor, and the system evaluates the solution and generates structured feedback.
 
-It mirrors the classroom structure closely so contributors can build AI-specific behavior safely, then integrate back into the main product with minimal friction.
-
-This project keeps the classroom architecture modular: setup, runtime state, UI shell, tools, and mode-specific composition are separated so new behavior can be added without rewriting the full flow.
+The architecture is modular — runtime state, UI shell, tools, and AI orchestration are separated so new behavior can be added without rewriting the full flow.
 
 ---
 
@@ -32,11 +30,19 @@ This project keeps the classroom architecture modular: setup, runtime state, UI 
 ```bash
 cd IntervueStack-AI-Core
 npm install
+```
+
+Create `.env.local` with:
+```
+VITE_OPENAI_API_KEY=sk-...
+```
+
+Start:
+```bash
 npm run dev
 ```
 
 Build:
-
 ```bash
 npm run build
 ```
@@ -45,170 +51,117 @@ npm run build
 
 ## Project Structure
 
-```text
+```
 IntervueStack-AI-Core/
-|-- public/
-|   `-- logo.svg
-`-- src/
-    |-- components/
-    |   `-- classroom/
-    |       |-- composition/
-    |       |   `-- ClassroomExperience.tsx
-    |       |-- modes/
-    |       |   |-- ai-interviewer/
-    |       |   |   `-- AiInterviewerClassroom.tsx
-    |       |   `-- standard/
-    |       |       `-- StandardClassroom.tsx
-    |       |-- runtime/
-    |       |   |-- ClassroomContext.tsx
-    |       |   |-- classroomMachine.ts
-    |       |   `-- types.ts
-    |       |-- setup/
-    |       |   `-- SessionSetup.tsx
-    |       |-- tools/
-    |       |   |-- code/
-    |       |   |   `-- CodeTool.tsx
-    |       |   |-- whiteboard/
-    |       |   |   `-- WhiteboardTool.tsx
-    |       |   |-- core/
-    |       |   |   |-- ToolTypes.ts
-    |       |   |   `-- ToolProvider.tsx
-    |       |   `-- registry.tsx
-    |       |-- ui/
-    |       |   |-- ClassroomShell.tsx
-    |       |   |-- Layout.tsx
-    |       |   |-- ControlsBar.tsx
-    |       |   |-- Panels/
-    |       |   |   |-- ToolPanel.tsx
-    |       |   |   |-- VideoPanel.tsx
-    |       |   |   `-- ChatPanel.tsx
-    |       |   `-- ToolsPanel.tsx
-    |       |-- types/
-    |       |   `-- modes.ts
-    |       `-- index.ts
-    |-- App.tsx
-    `-- main.tsx
+├── src/
+│   ├── App.tsx                              # Entry: setup → classroom
+│   ├── components/classroom/
+│   │   ├── setup/SessionSetup.tsx            # Name + session type form
+│   │   ├── composition/ClassroomExperience.tsx  # Provider + mode selector
+│   │   ├── runtime/
+│   │   │   ├── types.ts                     # Core state types
+│   │   │   ├── classroomMachine.ts          # Reducer (tools, code, status)
+│   │   │   └── ClassroomContext.tsx          # Context provider + hook
+│   │   ├── modes/
+│   │   │   ├── ai-interviewer/              # AI interviewer mode
+│   │   │   └── standard/                    # Baseline mode
+│   │   ├── ui/                              # Layout, shell, panels, controls
+│   │   ├── tools/
+│   │   │   ├── code/CodeTool.tsx            # Monaco editor with JS eval
+│   │   │   └── whiteboard/WhiteboardTool.tsx # tldraw whiteboard
+│   │   └── ai/                              # ← AI orchestration layer
+│   │       ├── useInterviewController.ts    # Central controller
+│   │       ├── openaiClient.ts              # OpenAI wrapper + JSON hardening
+│   │       ├── router/                      # State machine router
+│   │       │   ├── stateMachine.ts          # 10 states, transitions, agent configs
+│   │       │   ├── classifier.ts            # Pure function: next state from signal
+│   │       │   ├── runRouter.ts             # Step runner: classify → agents → LLM → parse
+│   │       │   ├── promptBuilder.ts         # LLM prompt from state + store
+│   │       │   └── parser.ts                # JSON extraction from LLM output
+│   │       ├── architecture/store.ts        # Centralized AI state (main + secondary)
+│   │       ├── architecture/agents/
+│   │       │   ├── personaAgent.ts          # LLM → tone/style
+│   │       │   ├── questionBankAgent.ts     # Deterministic problem selection
+│   │       │   ├── evaluatorAgent.ts        # Code eval + scoring
+│   │       │   ├── codeMonitorAgent.ts      # Deterministic: syntax, stuck, thrash detection
+│   │       │   └── timeManager.ts           # Session time limits
+│   │       ├── problems/dsaProblems.ts      # Problem bank (Two Sum, Longest Substring)
+│   │       ├── feedback/                    # Post-interview feedback generation
+│   │       ├── stt/                         # Whisper STT via browser
+│   │       └── TranscriptPanel.tsx          # Chat UI + voice button
+│   └── lib/
+│       ├── utils.ts                         # cn() helper
+│       └── tools.domain.ts                  # ToolType definitions
 ```
 
 ---
 
 ## Architecture Flow
 
-1. `main.tsx` mounts the app and global styles.
-2. `App.tsx` initializes the classroom entry flow.
-3. `SessionSetup.tsx` collects participant details and session type.
-4. `ClassroomExperience.tsx` creates and wires classroom runtime context.
-5. Mode components (`ai-interviewer` / `standard`) compose shared UI with mode-specific behavior.
-6. Tool registry mounts the active tool (`CodeTool` or `WhiteboardTool`) inside shared panels.
+```
+User Input (voice/text)
+        │
+        ▼
+useInterviewController  ← Code Monitor (deterministic, debounced)
+        │                     Timer loop (5s interval)
+        ▼
+runRouterStep()
+    ├── classify()           → Pure function: signal type → router state
+    ├── selectAgents()       → Which agents to run for this state
+    ├── runAgents()          → persona, question_bank, evaluator, time_manager
+    ├── buildPromptSlots()   → Build LLM prompt from state + store + agent outputs
+    ├── generateOpenAIJSON() → LLM call (gpt-4o-mini via OpenAI SDK)
+    ├── parseRouterOutput()  → JSON extraction + validation
+    └── applyTransition()    → Store updates + re-classify
+        │
+        ▼
+    Transcript update + UI re-render
+```
+
+### Router State Machine
+
+```
+greeting_init → collect_topic → problem_introduced → approach_discussion → coding
+                                                                   ↓
+                                                          coding_progressing
+                                                          coding_check_in
+                                                          stuck_coding
+                                                              ↓
+                                                          code_review → wrapup
+```
+
+Each state declares:
+- An `ai_goal` — what the interviewer should do
+- `agents_active` — which deterministic agents run
+- `transitions` — conditions to move to the next state
+
+Transitions are evaluated by a pure `classify()` function — no LLM involved in state routing. The LLM only generates the interviewer's message.
 
 ---
 
-## Component Responsibilities
+## Key Features
 
-### Entry and Composition
-
-- `src/App.tsx`  
-  Main application entry for routing between setup and classroom experience.
-
-- `src/components/classroom/setup/SessionSetup.tsx`  
-  Captures user name and session metadata before entering the classroom.
-
-- `src/components/classroom/composition/ClassroomExperience.tsx`  
-  Root composition layer that selects mode, initializes providers, and renders the classroom shell.
-
-### Modes
-
-- `src/components/classroom/modes/ai-interviewer/AiInterviewerClassroom.tsx`  
-  AI interviewer-focused classroom composition. Uses shared layout with AI-specific panel behavior.
-
-- `src/components/classroom/modes/standard/StandardClassroom.tsx`  
-  Baseline classroom composition used as a compatibility and comparison layer.
-
-### Runtime and State
-
-- `src/components/classroom/runtime/types.ts`  
-  Core state and action type definitions used across runtime and UI.
-
-- `src/components/classroom/runtime/classroomMachine.ts`  
-  State transition logic (reducer-style machine) for classroom interactions.
-
-- `src/components/classroom/runtime/ClassroomContext.tsx`  
-  Context provider/hooks exposing classroom state and dispatch to all child components.
-
-### Shared UI Shell
-
-- `src/components/classroom/ui/ClassroomShell.tsx`  
-  Top-level classroom shell that assembles header, body, and controls.
-
-- `src/components/classroom/ui/Layout.tsx`  
-  Grid and responsive layout primitives for panel placement.
-
-- `src/components/classroom/ui/ControlsBar.tsx`  
-  Bottom interaction controls (for current scope, primarily leave/session controls).
-
-- `src/components/classroom/ui/ToolsPanel.tsx`  
-  Wrapper around active tool panel and associated tool-area UI.
-
-- `src/components/classroom/ui/Panels/ToolPanel.tsx`  
-  Container for rendering whichever tool is currently active.
-
-- `src/components/classroom/ui/Panels/VideoPanel.tsx`  
-  Compact AI interviewer panel area with transcript section below.
-
-- `src/components/classroom/ui/Panels/ChatPanel.tsx`  
-  Conversation/chat display area where relevant for mode behavior.
-
-### Tools
-
-- `src/components/classroom/tools/registry.tsx`  
-  Central tool map for resolving and rendering tools by key.
-
-- `src/components/classroom/tools/core/ToolTypes.ts`  
-  Shared interfaces and contracts for tool implementation.
-
-- `src/components/classroom/tools/core/ToolProvider.tsx`  
-  Tool-level provider state and helper hooks used by tool components.
-
-- `src/components/classroom/tools/code/CodeTool.tsx`  
-  Monaco-based coding environment with language/runtime controls and execution output area.
-
-- `src/components/classroom/tools/whiteboard/WhiteboardTool.tsx`  
-  tldraw-powered whiteboard surface configured for classroom collaboration flow.
-
-### Public Classroom API
-
-- `src/components/classroom/types/modes.ts`  
-  Mode and session-level type contracts used across composition/runtime layers.
-
-- `src/components/classroom/index.ts`  
-  Barrel export for classroom modules; preferred import surface for new integrations.
+- **Voice interaction** — Push-to-talk via MediaRecorder, transcribed by Whisper (`gpt-4o-mini-transcribe`)
+- **Monaco code editor** — Multi-language, JS evaluation with real test execution
+- **LLM-driven interviewer** — OpenAI `gpt-4o-mini` powers the orchestrator, persona, evaluator, and feedback
+- **Deterministic code monitor** — Detects syntax errors, stuck progress, thrash rewrites without calling the LLM
+- **Rolling transcript summary** — Compresses long sessions to prevent context bloat
+- **Structured feedback** — Problem understanding, approach quality, code correctness, communication
+- **Dark-themed UI** — Minimal, focused interface
 
 ---
 
-## Contributor Guide
+## Tech Stack
 
-### Where to Add New Work
-
-- **AI-specific behavior**: `src/components/classroom/modes/ai-interviewer/`
-- **Shared classroom layout/UI**: `src/components/classroom/ui/`
-- **State and transitions**: `src/components/classroom/runtime/`
-- **Tool behavior (code/whiteboard)**: `src/components/classroom/tools/`
-
-### Architecture Notes
-
-- `ClassroomExperience.tsx` is the composition root (mode selection + provider wiring).
-- `SessionSetup.tsx` is the entry form for classroom start.
-- `index.ts` is the public export surface of the classroom module.
-- `classroomMachine.ts` should remain the source of truth for state transitions.
-- `tools/registry.tsx` should be updated whenever a new tool is introduced.
-
-### Contribution Rules
-
-- Keep mode-specific logic in `modes/ai-interviewer` unless both modes need it.
-- Prefer extending existing shared components over duplicate implementations.
-- Keep runtime logic in `runtime` and UI concerns in `ui`.
-- Register any new tool in `tools/registry.tsx`.
-- Add or update related types before wiring new runtime or UI behavior.
+| Layer | Choice |
+|-------|--------|
+| Framework | React 18, TypeScript 5.8 |
+| Build | Vite 7 |
+| Styling | Tailwind CSS 3 |
+| LLM | OpenAI (`gpt-4o-mini`) |
+| STT | OpenAI Whisper (`gpt-4o-mini-transcribe`) |
+| Code editor | Monaco (@monaco-editor/react) |
+| Whiteboard | tldraw |
 
 ---
 
@@ -217,44 +170,3 @@ IntervueStack-AI-Core/
 **Built for IntervueStack contributors**
 
 </div>
-
-# IntervueStack-AI-Core
-
-## Overview
-A modular AI-powered DSA interviewer for realistic mock technical interviews. Features:
-- Voice-based interaction (ElevenLabs STT)
-- Monaco code editor with real JS/TS code evaluation
-- LLM-driven interviewer (Gemini API)
-- Visible transcript and structured feedback
-- Modular, extensible, robust architecture
-
-## Features
-- Realistic 30–45 min interview session flow
-- Context-aware, LLM-guided interviewer
-- Voice input with transcript
-- Code analysis and real test execution
-- Structured feedback at session end
-
-## Quickstart
-1. Clone the repo:
-   ```bash
-   git clone <repo-url>
-   cd IntervueStack-AI-Core
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Add `.env.local` with your API keys (see sample in repo).
-4. Start the dev servers:
-   ```bash
-   npm run dev
-   # In another terminal:
-   npm run stt-server
-   ```
-5. Open the app in your browser and start a session.
-
-## Architecture
-See `REPORT.md` for a detailed system design, ASCII diagrams, and explanations.
-
-**For more details, see the full report in `REPORT.md`.**
