@@ -38,6 +38,8 @@ export function useInterviewController() {
   const [isThinking, setIsThinking] = useState(false);
   const [lastEval, setLastEval] = useState<CodeEvalResult | null>(null);
   const [feedback, setFeedback] = useState<import("./feedback/feedbackGenerator").StructuredFeedback | null>(null);
+  const codeRef = useRef(classroomState.code);
+  useEffect(() => { codeRef.current = classroomState.code; }, [classroomState.code]);
 
   // Cooldown for autonomous (timer/monitor) interventions
   const lastAutoInterventionAtRef = useRef<number>(0);
@@ -75,7 +77,9 @@ export function useInterviewController() {
   const interviewRef = useRef(interview);
   const transcriptRef = useRef(transcript);
   const lastEvalRef = useRef(lastEval);
+  const feedbackRef = useRef(feedback);
 
+  useEffect(() => { feedbackRef.current = feedback; }, [feedback]);
   useEffect(() => {
     interviewRef.current = interview;
   }, [interview]);
@@ -235,6 +239,21 @@ export function useInterviewController() {
           setLastEval(evalResult);
           aiDispatch({ type: "SECONDARY/SET_CODE_EVAL", result: evalResult });
         }
+
+        // Generate feedback on timer hard stop or when phase ends
+        if ((timerFlagsRef.current.hardStopped || aiStoreRef.current.main.phase === "ended") && !feedbackRef.current) {
+          try {
+            const fb = await generateStructuredFeedback({
+              interview: interviewRef.current,
+              transcript: useTranscript,
+              userCode: classroomState.code,
+              lastCodeEval: lastEvalRef.current
+            });
+            setFeedback(fb);
+          } catch {
+            // ignore feedback errors
+          }
+        }
       } catch (e) {
         pushTurn({ role: "system", text: `AI error: ${e instanceof Error ? e.message : String(e)}` });
       } finally {
@@ -244,6 +263,32 @@ export function useInterviewController() {
     },
     [classroomState.code, dispatch, pushTurn]
   );
+
+  const feedbackGeneratingRef = useRef(false);
+  const generateFeedback = useCallback(async () => {
+    if (feedbackRef.current || feedbackGeneratingRef.current) return null;
+    feedbackGeneratingRef.current = true;
+    try {
+      const fb = await generateStructuredFeedback({
+        interview: interviewRef.current,
+        transcript: transcriptRef.current,
+        userCode: codeRef.current,
+        lastCodeEval: lastEvalRef.current
+      });
+      setFeedback(fb);
+      return fb;
+    } catch {
+      return null;
+    } finally {
+      feedbackGeneratingRef.current = false;
+    }
+  }, []);
+
+  // Generate feedback on End Session
+  useEffect(() => {
+    window.addEventListener("intervue:endSession", generateFeedback);
+    return () => window.removeEventListener("intervue:endSession", generateFeedback);
+  }, [generateFeedback]);
 
   const sendUserText = useCallback(
     async (text: string) => {
@@ -411,6 +456,7 @@ export function useInterviewController() {
     isThinking,
     lastEval,
     sendUserText,
-    feedback
+    feedback,
+    generateFeedback
   };
 }

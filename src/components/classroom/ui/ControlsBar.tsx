@@ -7,16 +7,14 @@ interface ControlsBarProps {
 }
 
 export function ControlsBar({ onLeave }: ControlsBarProps) {
-  const { interview, feedback, isThinking } = useInterviewController();
+  const { interview, feedback, isThinking, generateFeedback } = useInterviewController();
   return (
     <div className="h-14 bg-[#0a0a0a] flex items-center justify-center gap-2 px-3">
       <button
         type="button"
         onClick={async () => {
           if (!feedback && interview.phase !== "ended" && !isThinking) {
-            const evt = new CustomEvent("intervue:endSession");
-            window.dispatchEvent(evt);
-            await new Promise((res) => setTimeout(res, 1200));
+            await generateFeedback();
           }
           onLeave();
         }}
