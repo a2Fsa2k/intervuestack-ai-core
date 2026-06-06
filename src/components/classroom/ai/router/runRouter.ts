@@ -1,3 +1,4 @@
+import type { StoreAction } from "../architecture/store";
 import type { InputBundle, RouterResult, RouterLLMOutput } from "./types";
 import { ROUTER_STATES, type RouterStateId } from "./stateMachine";
 import { classify } from "./classifier";
@@ -95,6 +96,13 @@ export async function runRouterStep(bundle: InputBundle): Promise<RouterResult> 
   const agents = selectAgents(state.id);
   const agentOutputs = await runAgents({ agents, bundle: { ...bundle, currentStateId: classifiedStateId } });
 
+  // Deterministic problem dispatch: LLM can't reliably include complex problem objects in store_updates.
+  const extraDispatches: StoreAction[] = [];
+  const qbProblem = (agentOutputs.question_bank as any)?.problem;
+  if (qbProblem && !bundle.store.main.problem) {
+    extraDispatches.push({ type: "MAIN/SET_PROBLEM", problem: qbProblem });
+  }
+
   const prompt = buildPromptSlots({
     state,
     store: bundle.store,
@@ -118,7 +126,7 @@ export async function runRouterStep(bundle: InputBundle): Promise<RouterResult> 
 
   return {
     aiMessage: parsed.message ?? LLM_FALLBACK.message,
-    dispatches: transitioned.dispatches,
+    dispatches: [...extraDispatches, ...transitioned.dispatches],
     nextStateId: transitioned.nextStateId
   };
 }
