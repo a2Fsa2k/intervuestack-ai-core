@@ -5,10 +5,32 @@ function getOpenAIClient() {
   if (!apiKey) {
     throw new Error("Missing VITE_OPENAI_API_KEY. Add it to a .env.local file.");
   }
-
-  // Browser usage is allowed here; this is a demo/prototype environment.
-  // For production, proxy these calls through a server to keep keys private.
   return new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+}
+
+async function generateOpenAITextProd(opts: {
+  model?: string;
+  system: string;
+  user: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+}): Promise<string> {
+  const r = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: opts.model ?? "gpt-4o-mini",
+      messages: [
+        { role: "system", content: opts.system },
+        { role: "user", content: opts.user }
+      ],
+      temperature: opts.temperature,
+      max_tokens: opts.maxOutputTokens,
+    }),
+  });
+  if (!r.ok) throw new Error(`Chat proxy: ${r.status}`);
+  const data = await r.json();
+  return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
 type JsonValidator<T> = (value: unknown) => value is T;
@@ -62,6 +84,10 @@ export async function generateOpenAIText(opts: {
   temperature?: number;
   maxOutputTokens?: number;
 }): Promise<string> {
+  if (!import.meta.env.DEV) {
+    return generateOpenAITextProd(opts);
+  }
+
   const client = getOpenAIClient();
 
   const res = await client.chat.completions.create({
