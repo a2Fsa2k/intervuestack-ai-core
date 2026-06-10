@@ -24,4 +24,6 @@ export interface RouterResult {
   aiMessage: string;
   dispatches: StoreAction[];
   nextStateId: RouterStateId;
+  /** Code to write into the classroom editor (e.g. starter code with problem as comments). */
+  codeUpdate?: string;
 }

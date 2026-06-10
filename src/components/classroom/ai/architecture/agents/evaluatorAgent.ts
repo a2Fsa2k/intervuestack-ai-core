@@ -1,6 +1,5 @@
 import type { AIInterviewStoreState } from "../store";
 import type { CodeEvalResult } from "../../types";
-import { evaluateUserCodeJS } from "../../codeEval";
 import { generateOpenAIJSON } from "../../openaiClient";
 
 export type CorrectnessLabel = "correct" | "partial" | "wrong";
@@ -51,14 +50,10 @@ export async function evaluatorAgent(opts: {
   userInput: string;
   userCode: string;
   recentTranscriptText: string;
-  runCodeEval?: boolean;
 }): Promise<EvaluatorOutput> {
-  const { main, userInput, userCode, recentTranscriptText, runCodeEval } = opts;
+  const { main, userInput, userCode, recentTranscriptText } = opts;
 
-  let codeEval: CodeEvalResult | null | undefined = opts.secondary.lastCodeEval;
-  if (runCodeEval && main.problem) {
-    codeEval = await evaluateUserCodeJS({ userCode, problem: main.problem });
-  }
+  const codeEval: CodeEvalResult | null | undefined = undefined;
 
   const correctness = correctnessFromEval(codeEval);
 

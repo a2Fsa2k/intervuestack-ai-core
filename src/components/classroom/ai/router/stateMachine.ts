@@ -1,6 +1,7 @@
 export type RouterStateId =
   | "greeting_init"
   | "collect_topic"
+  | "language_select"
   | "problem_introduced"
   | "approach_discussion"
   | "coding"
@@ -25,7 +26,8 @@ export type TransitionConditionId =
   | "userAsksQuestion"
   | "idle_60s"
   | "idle_120s"
-  | "mentions_topic";
+  | "mentions_topic"
+  | "mentions_language";
 
 export interface StateTransition {
   to: RouterStateId;
@@ -51,12 +53,23 @@ export const ROUTER_STATES: Record<RouterStateId, RouterStateConfig> = {
 
   collect_topic: {
     id: "collect_topic",
-    ai_goal: "Collect a topic (and optionally difficulty). Then introduce a problem.",
+    ai_goal: "Collect a topic (and optionally difficulty). Then ask for preferred programming language.",
     agents_active: ["persona", "question_bank"],
     transitions: [
-      { to: "problem_introduced", when: "mentions_topic" },
-      { to: "problem_introduced", when: "userSaysReady" },
+      { to: "language_select", when: "mentions_topic" },
+      { to: "language_select", when: "userSaysReady" },
       { to: "collect_topic", when: "userAsksQuestion" }
+    ]
+  },
+
+  language_select: {
+    id: "language_select",
+    ai_goal: "Ask which programming language they want to use (JavaScript, Python, Java, C++, or C). Do not discuss the problem yet.",
+    agents_active: ["persona", "question_bank"],
+    transitions: [
+      { to: "problem_introduced", when: "mentions_language" },
+      { to: "language_select", when: "userAsksQuestion" },
+      { to: "language_select", when: "userResponded" }
     ]
   },
 
@@ -122,7 +135,7 @@ export const ROUTER_STATES: Record<RouterStateId, RouterStateConfig> = {
 
   code_review: {
     id: "code_review",
-    ai_goal: "Evaluate the solution (tests/correctness) and discuss improvements briefly.",
+    ai_goal: "Review the code quality and discuss improvements briefly.",
     agents_active: ["persona", "evaluator", "question_bank"],
     transitions: [
       { to: "wrapup", when: "userResponded" },

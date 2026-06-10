@@ -26,21 +26,27 @@ export function buildPromptSlots(opts: {
 
   const persona = agentOutputs.persona as any;
   const system_persona = persona
-    ? `You are an AI interviewer. Tone: ${persona.tone}. Style: ${persona.style}. Probing style: ${persona.probing_style}.`
-    : "You are an AI interviewer.";
+    ? `You are an AI technical interviewer. Tone: ${persona.tone}. Style: ${persona.style}. You ask questions — you do not provide answers or solutions.`
+    : "You are an AI technical interviewer. You ask questions — you do not provide answers or solutions.";
 
   const state_context = `State: ${state.id}\nAI goal: ${state.ai_goal}`;
 
   const state_behavior_instruction =
-    state.id === "coding_progressing"
-      ? "Briefly acknowledge progress (max 1 sentence), then ask ONE light probing question about complexity or correctness."
-      : state.id === "coding_check_in"
-        ? "The candidate has been idle. Gently check in without pressure. Do not give hints yet."
-        : state.id === "stuck_coding"
-          ? "The candidate is likely stuck. Provide a small hint without giving the full solution or final code."
-          : state.id === "approach_discussion"
-            ? "Discuss approach quality and guide toward an optimal solution."
-            : "";
+    state.id === "language_select"
+      ? "Briefly ask which language they prefer. Do not mention or hint at the problem yet."
+      : state.id === "problem_introduced"
+        ? "State the problem name and briefly describe it (1-2 sentences). Ask if they understand the problem. Do not explain the approach or solution."
+        : state.id === "coding_progressing"
+          ? "Briefly acknowledge progress (max 1 sentence), then ask ONE light probing question."
+          : state.id === "coding_check_in"
+            ? "The candidate has been idle. Gently check in without pressure. Do not give hints."
+            : state.id === "stuck_coding"
+              ? "The candidate is likely stuck. Provide a small hint without giving the full solution or final code."
+              : state.id === "approach_discussion"
+                ? "Ask about their approach. Do not suggest or guide toward a solution. Let the candidate decide."
+                : state.id === "code_review"
+                  ? "Briefly comment on their solution. Ask what they would improve. Do not rewrite their code."
+                  : "";
 
   const rolling_summary = store.main.rollingSummary ? `Rolling summary:\n${store.main.rollingSummary}` : "";
   const transcript_tail = transcriptTail.length ? `Transcript (last turns):\n${formatTranscriptTail(transcriptTail)}` : "";
@@ -57,8 +63,10 @@ export function buildPromptSlots(opts: {
   const state_instructions = [
     "Return ONLY valid JSON: { message: string, store_updates?: StoreAction[] }",
     "Do not include markdown.",
-    "Keep the message concise (1-3 short paragraphs).",
-    "Ask at most one direct question unless necessary."
+    "Keep the message VERY concise — maximum 2 short sentences.",
+    "Ask exactly ONE question per message.",
+    "NEVER explain the solution or approach. The candidate must figure it out themselves.",
+    "NEVER write code in your response."
   ].join("\n");
 
   const userParts = [

@@ -1,5 +1,6 @@
 import type { StoreAction } from "../architecture/store";
 import type { InputBundle, RouterResult, RouterLLMOutput } from "./types";
+import type { InterviewProblem } from "../types";
 import { ROUTER_STATES, type RouterStateId } from "./stateMachine";
 import { classify } from "./classifier";
 import { selectAgents } from "./agentSelector";
@@ -18,6 +19,29 @@ const LLM_FALLBACK: RouterLLMOutput = {
   message: "Let's continue. Walk me through your thinking.",
   store_updates: []
 };
+
+const COMMENT_SYMBOL: Record<string, string> = {
+  javascript: "//",
+  python: "#",
+  java: "//",
+  cpp: "//",
+  c: "//"
+};
+
+function generateStarterCode(problem: InterviewProblem, language: string): string {
+  const comment = COMMENT_SYMBOL[language] ?? "//";
+  const lines: string[] = [
+    `${comment} Problem: ${problem.title}`,
+    `${comment} ${problem.prompt}`,
+    ""
+  ];
+  for (const ex of problem.examples) {
+    lines.push(`${comment} Example: ${ex.input} -> ${ex.output}`);
+    if (ex.explanation) lines.push(`${comment} ${ex.explanation}`);
+  }
+  lines.push("", problem.starterCode);
+  return lines.join("\n");
+}
 
 async function runAgents(opts: {
   agents: string[];
@@ -52,8 +76,7 @@ async function runAgents(opts: {
           secondary: bundle.store.secondary,
           userInput: bundle.userInput ?? "",
           userCode: bundle.userCode ?? "",
-          recentTranscriptText: tail,
-          runCodeEval: true
+          recentTranscriptText: tail
         });
         out.evaluator = ev;
         break;
@@ -99,8 +122,15 @@ export async function runRouterStep(bundle: InputBundle): Promise<RouterResult> 
   // Deterministic problem dispatch: LLM can't reliably include complex problem objects in store_updates.
   const extraDispatches: StoreAction[] = [];
   const qbProblem = (agentOutputs.question_bank as any)?.problem;
-  if (qbProblem && !bundle.store.main.problem) {
+  const problemJustSelected = !bundle.store.main.problem && qbProblem;
+  if (problemJustSelected) {
     extraDispatches.push({ type: "MAIN/SET_PROBLEM", problem: qbProblem });
+  }
+
+  // When first entering problem_introduced, write starter code with problem as comments.
+  let codeUpdate: string | undefined;
+  if (classifiedStateId === "problem_introduced" && problemJustSelected && qbProblem) {
+    codeUpdate = generateStarterCode(qbProblem, bundle.store.main.preferredLanguage);
   }
 
   const prompt = buildPromptSlots({
@@ -127,6 +157,7 @@ export async function runRouterStep(bundle: InputBundle): Promise<RouterResult> 
   return {
     aiMessage: parsed.message ?? LLM_FALLBACK.message,
     dispatches: [...extraDispatches, ...transitioned.dispatches],
-    nextStateId: transitioned.nextStateId
+    nextStateId: transitioned.nextStateId,
+    codeUpdate
   };
 }

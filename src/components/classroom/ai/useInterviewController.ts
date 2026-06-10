@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useReducer } from "react";
 import { useClassroomContext } from "../runtime/ClassroomContext";
-import type { CodeEvalResult, InterviewState, TranscriptTurn } from "./types";
-import { evaluateUserCodeJS } from "./codeEval";
+import type { InterviewState, TranscriptTurn } from "./types";
 import { generateStructuredFeedback } from "./feedback/feedbackGenerator";
 import { createInitialStoreState, aiInterviewStoreReducer } from "./architecture/store";
 import { runRouterStep } from "./router/runRouter";
@@ -36,7 +35,6 @@ export function useInterviewController() {
   const [interview, setInterview] = useState<InterviewState>(() => createInitialInterviewStateLocal());
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const [isThinking, setIsThinking] = useState(false);
-  const [lastEval, setLastEval] = useState<CodeEvalResult | null>(null);
   const [feedback, setFeedback] = useState<import("./feedback/feedbackGenerator").StructuredFeedback | null>(null);
   const codeRef = useRef(classroomState.code);
   useEffect(() => { codeRef.current = classroomState.code; }, [classroomState.code]);
@@ -76,7 +74,6 @@ export function useInterviewController() {
   // ...existing refs...
   const interviewRef = useRef(interview);
   const transcriptRef = useRef(transcript);
-  const lastEvalRef = useRef(lastEval);
   const feedbackRef = useRef(feedback);
 
   useEffect(() => { feedbackRef.current = feedback; }, [feedback]);
@@ -86,9 +83,6 @@ export function useInterviewController() {
   useEffect(() => {
     transcriptRef.current = transcript;
   }, [transcript]);
-  useEffect(() => {
-    lastEvalRef.current = lastEval;
-  }, [lastEval]);
 
   const hydratedRef = useRef(false);
 
@@ -194,6 +188,11 @@ export function useInterviewController() {
 
         for (const a of res.dispatches) aiDispatch(a);
 
+        // If router generated starter code, write it to the editor.
+        if (res.codeUpdate) {
+          dispatch({ type: "UPDATE_CODE", code: res.codeUpdate });
+        }
+
         if (res.aiMessage) {
           lastAiMessageAtRef.current = now;
           lastStateChangeAtRef.current = now;
@@ -232,14 +231,6 @@ export function useInterviewController() {
           dispatch({ type: "SET_ACTIVE_PROBLEM", problemId: nextProblem.id });
         }
 
-        // Optional code eval (deterministic) if orchestrator indicates.
-        // Router path: keep existing eval behavior only when phase is code_review/testing.
-        if (aiStoreRef.current.main.problem && (routerStateIdRef.current === "code_review" || aiStoreRef.current.main.phase === "testing")) {
-          const evalResult = await evaluateUserCodeJS({ userCode: classroomState.code, problem: aiStoreRef.current.main.problem });
-          setLastEval(evalResult);
-          aiDispatch({ type: "SECONDARY/SET_CODE_EVAL", result: evalResult });
-        }
-
         // Generate feedback on timer hard stop or when phase ends
         if ((timerFlagsRef.current.hardStopped || aiStoreRef.current.main.phase === "ended") && !feedbackRef.current) {
           try {
@@ -247,7 +238,7 @@ export function useInterviewController() {
               interview: interviewRef.current,
               transcript: useTranscript,
               userCode: classroomState.code,
-              lastCodeEval: lastEvalRef.current
+              lastCodeEval: null
             });
             setFeedback(fb);
           } catch {
@@ -273,7 +264,7 @@ export function useInterviewController() {
         interview: interviewRef.current,
         transcript: transcriptRef.current,
         userCode: codeRef.current,
-        lastCodeEval: lastEvalRef.current
+        lastCodeEval: null
       });
       setFeedback(fb);
       return fb;
@@ -454,7 +445,6 @@ export function useInterviewController() {
     transcript,
     transcriptTextForDebug,
     isThinking,
-    lastEval,
     sendUserText,
     feedback,
     generateFeedback

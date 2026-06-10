@@ -19,7 +19,7 @@ export interface SharedStateMain {
     | "wrapup"
     | "ended";
   selectedTopic?: string;
-  preferredLanguage: "javascript";
+  preferredLanguage: "javascript" | "python" | "java" | "cpp" | "c";
   problem?: InterviewProblem;
   rollingSummary: string;
   lastUserInput?: string;
@@ -45,6 +45,7 @@ export interface AIInterviewStoreState {
 export type StoreAction =
   | { type: "MAIN/SET_PHASE"; phase: SharedStateMain["phase"] }
   | { type: "MAIN/SET_TOPIC"; topic?: string }
+  | { type: "MAIN/SET_LANGUAGE"; language: SharedStateMain["preferredLanguage"] }
   | { type: "MAIN/SET_PROBLEM"; problem?: InterviewProblem }
   | { type: "MAIN/SET_LAST_USER_INPUT"; text: string; at: number }
   | { type: "MAIN/SET_CODE_SNAPSHOT"; code: string; at: number }
@@ -86,6 +87,8 @@ export function aiInterviewStoreReducer(state: AIInterviewStoreState, action: St
       return { ...state, main: { ...state.main, phase: action.phase } };
     case "MAIN/SET_TOPIC":
       return { ...state, main: { ...state.main, selectedTopic: action.topic } };
+    case "MAIN/SET_LANGUAGE":
+      return { ...state, main: { ...state.main, preferredLanguage: action.language } };
     case "MAIN/SET_PROBLEM":
       return { ...state, main: { ...state.main, problem: action.problem } };
     case "MAIN/SET_LAST_USER_INPUT":

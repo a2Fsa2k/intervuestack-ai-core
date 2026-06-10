@@ -4,7 +4,6 @@ import { ChevronUp, Loader2, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ToolComponentProps } from "../core/ToolTypes";
 import { useClassroomContext } from "../../runtime/ClassroomContext";
-import { evaluateUserCodeJS } from "../../ai/codeEval";
 import { DSA_PROBLEMS } from "../../ai/problems/dsaProblems";
 
 const SUPPORTED_LANGUAGES = [
@@ -57,26 +56,9 @@ export function CodeTool({ isActive }: ToolComponentProps) {
     setTerminalOutput("🔄 Executing code...\n");
 
     try {
-      if (selectedLanguage === "javascript" && state.sessionType === "dsa") {
-        const problem = state.activeProblemId
-          ? DSA_PROBLEMS.find((p) => p.id === state.activeProblemId)
-          : undefined;
-
-        if (problem) {
-          const res = await evaluateUserCodeJS({ userCode: code, problem });
-          const summary = `✅ Tests: ${res.passedCount}/${res.totalCount} passed`;
-          const failLines = res.failures.length
-            ? "\n\nFailures:\n" +
-              res.failures
-                .map((f) => `- ${f.name}: expected ${JSON.stringify(f.expected)} got ${JSON.stringify(f.received)}${f.error ? ` (${f.error})` : ""}`)
-                .join("\n")
-            : "";
-          setTerminalOutput(summary + failLines);
-        } else {
-          setTerminalOutput(
-            "ℹ️ No active interview problem is selected yet. Ask the interviewer to start a problem (or restart the session)."
-          );
-        }
+      if (state.sessionType === "dsa") {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        setTerminalOutput("✅ Code submitted. (Compiler server integration coming soon.)");
       } else {
         await new Promise((resolve) => setTimeout(resolve, 350));
         setTerminalOutput(

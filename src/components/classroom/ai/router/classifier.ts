@@ -34,6 +34,11 @@ export function evaluateCondition(cond: TransitionConditionId, bundle: InputBund
       const keywords = t?.keywords ?? ["array", "string", "graph", "dp", "dynamic programming", "hashmap", "tree"];
       return includesAny(text, keywords);
     }
+    case "mentions_language": {
+      if (!hasText) return false;
+      const keywords = t?.keywords ?? ["javascript", "python", "java", "c++", "cpp", "c", "js", "py", "node"];
+      return includesAny(text, keywords);
+    }
     default:
       return false;
   }
